@@ -1,20 +1,14 @@
-const fs = require("fs");
+const fs = require('fs');
 const {
   ApiGatewayManagementApiClient,
   DeleteConnectionCommand,
   PostToConnectionCommand,
-} = require("@aws-sdk/client-apigatewaymanagementapi");
-const { spawn } = require("child_process");
+} = require('@aws-sdk/client-apigatewaymanagementapi');
+const { spawn } = require('child_process');
 
-const client = process.env.CALLBACK_URL
-  ? new ApiGatewayManagementApiClient({
-      endpoint: process.env.CALLBACK_URL,
-    })
-  : {
-      send(command) {
-        console.log(command);
-      },
-    };
+const client = new ApiGatewayManagementApiClient({
+  endpoint: process.env.CALLBACK_URL,
+});
 
 exports.handler = async (event) => {
   console.log(event);
@@ -25,9 +19,11 @@ exports.handler = async (event) => {
   await ensureEmCache(connectionId);
   await createWorkspace(connectionId);
   await saveCode(connectionId, code);
-  await makeObjDir(connectionId);
-  await makeSimulatorJs(connectionId);
-  await sendOutput(connectionId);
+
+  (await makeObjDir(connectionId)) &&
+    (await makeSimulatorJs(connectionId)) &&
+    (await sendOutput(connectionId));
+
   await deleteConnection(connectionId);
 
   return {
@@ -36,29 +32,29 @@ exports.handler = async (event) => {
 };
 
 async function ensureEmCache(connectionId) {
-  if (fs.existsSync("/tmp/em_cache")) {
+  if (fs.existsSync('/tmp/em_cache')) {
     return;
   }
 
-  await sendMessage(connectionId, "internal", "Copying cache...");
+  await sendMessage(connectionId, 'internal', 'Copying cache...');
 
   await execWrapper(
     connectionId,
-    `cp -r /var/task/emsdk/upstream/emscripten/cache /tmp/em_cache`
+    `cp -r /var/task/emsdk/upstream/emscripten/cache /tmp/em_cache`,
   );
 }
 
 async function createWorkspace(connectionId) {
-  await sendMessage(connectionId, "internal", "Creating workspace...");
+  await sendMessage(connectionId, 'internal', 'Creating workspace...');
 
   await execWrapper(
     connectionId,
-    `cp -r workspace-base /tmp/workspace-${connectionId}`
+    `cp -r workspace-base /tmp/workspace-${connectionId}`,
   );
 }
 
 async function saveCode(connectionId, code) {
-  await sendMessage(connectionId, "internal", "Saving code...");
+  await sendMessage(connectionId, 'internal', 'Saving code...');
 
   fs.writeFileSync(`/tmp/workspace-${connectionId}/top.sv`, code);
 }
@@ -66,37 +62,53 @@ async function saveCode(connectionId, code) {
 async function makeObjDir(connectionId) {
   await sendMessage(
     connectionId,
-    "internal",
-    "Making obj_dir (System Verilog -> C++)..."
+    'internal',
+    'Making obj_dir (System Verilog -> C++)...',
   );
 
-  await execWrapper(
+  const result = await execWrapper(
     connectionId,
     `make obj_dir`,
-    `/tmp/workspace-${connectionId}`
+    `/tmp/workspace-${connectionId}`,
   );
+
+  if (result === null) {
+    await sendMessage(connectionId, 'internal', 'Failed!');
+
+    return false;
+  }
+
+  return true;
 }
 
 async function makeSimulatorJs(connectionId) {
   await sendMessage(
     connectionId,
-    "internal",
-    "Making simulator.js (C++ -> JavaScript)..."
+    'internal',
+    'Making simulator.js (C++ -> JavaScript)...',
   );
 
-  await execWrapper(
+  const result = await execWrapper(
     connectionId,
     `source /var/task/emsdk/emsdk_env.sh && make simulator.js`,
-    `/tmp/workspace-${connectionId}`
+    `/tmp/workspace-${connectionId}`,
   );
+
+  if (result === null) {
+    await sendMessage(connectionId, 'internal', 'Failed!');
+
+    return false;
+  }
+
+  return true;
 }
 
 async function sendOutput(connectionId) {
-  await sendMessage(connectionId, "internal", "Sending output...");
+  await sendMessage(connectionId, 'internal', 'Sending output...');
 
   const output = fs.readFileSync(
     `/tmp/workspace-${connectionId}/simulator.js`,
-    "utf8"
+    'utf8',
   );
 
   const limit = 100000;
@@ -105,16 +117,16 @@ async function sendOutput(connectionId) {
   while (i < output.length) {
     await sendMessage(
       connectionId,
-      "output",
-      output.substring(i, Math.min(i + limit, output.length))
+      'output',
+      output.substring(i, Math.min(i + limit, output.length)),
     );
     i += limit;
   }
-  await sendMessage(connectionId, "output-finished", "");
+  await sendMessage(connectionId, 'output-finished', '');
 }
 
 async function deleteConnection(connectionId) {
-  await sendMessage(connectionId, "internal", "Deleting connection...");
+  await sendMessage(connectionId, 'internal', 'Deleting connection...');
 
   const input = {
     ConnectionId: connectionId,
@@ -131,15 +143,15 @@ async function execWrapper(connectionId, command, cwd) {
 
     const promises = [];
 
-    child.stdout.on("data", (data) => {
-      promises.push(sendMessage(connectionId, "stdout", data.toString()));
+    child.stdout.on('data', (data) => {
+      promises.push(sendMessage(connectionId, 'stdout', data.toString()));
     });
 
-    child.stderr.on("data", (data) => {
-      promises.push(sendMessage(connectionId, "stderr", data.toString()));
+    child.stderr.on('data', (data) => {
+      promises.push(sendMessage(connectionId, 'stderr', data.toString()));
     });
 
-    child.on("close", async (code) => {
+    child.on('close', async (code) => {
       await Promise.all(promises);
 
       resolve(code);
