@@ -13,8 +13,8 @@ const client = new ApiGatewayManagementApiClient({
 exports.handler = async (event) => {
   console.log(event);
 
-  const connectionId = event.requestContext.connectionId;
-  const code = JSON.parse(event.body).message;
+  const connectionId = event.connectionId;
+  const code = event.code;
 
   await ensureEmCache(connectionId);
   await createWorkspace(connectionId);
