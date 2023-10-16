@@ -16,6 +16,7 @@ export async function handler(event) {
       connectionId,
       code,
     }),
+    InvocationType: 'Event',
   });
   await client.send(command);
 
