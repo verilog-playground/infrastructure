@@ -16,11 +16,10 @@ exports.handler = async (event) => {
   const connectionId = event.connectionId;
   const code = event.code;
 
-  await ensureEmCache(connectionId);
-  await createWorkspace(connectionId);
-  await saveCode(connectionId, code);
-
-  (await makeObjDir(connectionId)) &&
+  (await ensureEmCache(connectionId)) &&
+    (await createWorkspace(connectionId)) &&
+    (await saveCode(connectionId, code)) &&
+    (await makeObjDir(connectionId)) &&
     (await makeSimulatorJs(connectionId)) &&
     (await sendOutput(connectionId));
 
@@ -33,12 +32,12 @@ exports.handler = async (event) => {
 
 async function ensureEmCache(connectionId) {
   if (fs.existsSync('/tmp/em_cache')) {
-    return;
+    return true;
   }
 
   await sendMessage(connectionId, 'internal', 'Copying cache...');
 
-  await execWrapper(
+  return await execWrapper(
     connectionId,
     `cp -r /var/task/emsdk/upstream/emscripten/cache /tmp/em_cache`,
   );
@@ -47,7 +46,7 @@ async function ensureEmCache(connectionId) {
 async function createWorkspace(connectionId) {
   await sendMessage(connectionId, 'internal', 'Creating workspace...');
 
-  await execWrapper(
+  return await execWrapper(
     connectionId,
     `cp -r workspace-base /tmp/workspace-${connectionId}`,
   );
@@ -57,6 +56,8 @@ async function saveCode(connectionId, code) {
   await sendMessage(connectionId, 'internal', 'Saving code...');
 
   fs.writeFileSync(`/tmp/workspace-${connectionId}/top.sv`, code);
+
+  return true;
 }
 
 async function makeObjDir(connectionId) {
@@ -66,19 +67,11 @@ async function makeObjDir(connectionId) {
     'Making obj_dir (System Verilog -> C++)...',
   );
 
-  const result = await execWrapper(
+  return await execWrapper(
     connectionId,
     `make obj_dir`,
     `/tmp/workspace-${connectionId}`,
   );
-
-  if (result === null) {
-    await sendMessage(connectionId, 'internal', 'Failed!');
-
-    return false;
-  }
-
-  return true;
 }
 
 async function makeSimulatorJs(connectionId) {
@@ -88,19 +81,11 @@ async function makeSimulatorJs(connectionId) {
     'Making simulator.js (C++ -> JavaScript)...',
   );
 
-  const result = await execWrapper(
+  return await execWrapper(
     connectionId,
     `source /var/task/emsdk/emsdk_env.sh && make simulator.js`,
     `/tmp/workspace-${connectionId}`,
   );
-
-  if (result === null) {
-    await sendMessage(connectionId, 'internal', 'Failed!');
-
-    return false;
-  }
-
-  return true;
 }
 
 async function sendOutput(connectionId) {
@@ -123,6 +108,8 @@ async function sendOutput(connectionId) {
     i += limit;
   }
   await sendMessage(connectionId, 'output-finished', '');
+
+  return true;
 }
 
 async function deleteConnection(connectionId) {
@@ -151,10 +138,28 @@ function execWrapper(connectionId, command, cwd) {
       promises.push(sendMessage(connectionId, 'stderr', data.toString()));
     });
 
-    child.on('close', async (code) => {
+    child.on('close', async (code, signal) => {
       await Promise.all(promises);
 
-      resolve(code);
+      if (code === null) {
+        await sendMessage(
+          connectionId,
+          'internal',
+          `Failed! SIGKILL: ${signal}.`,
+        );
+
+        resolve(false);
+      } else if (code !== 0) {
+        await sendMessage(
+          connectionId,
+          'internal',
+          `Failed! Exit code: ${code}.`,
+        );
+
+        resolve(false);
+      }
+
+      resolve(true);
     });
   });
 }
