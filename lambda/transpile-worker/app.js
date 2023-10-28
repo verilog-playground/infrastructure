@@ -137,7 +137,7 @@ async function deleteConnection(connectionId) {
   return response;
 }
 
-async function execWrapper(connectionId, command, cwd) {
+function execWrapper(connectionId, command, cwd) {
   return new Promise((resolve) => {
     const child = spawn(command, { cwd, shell: true });
 
