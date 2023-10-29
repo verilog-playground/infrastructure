@@ -10,12 +10,36 @@ export class ServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
+    if (RECAPTCHA_SECRET_KEY === undefined) {
+      throw new Error('Please provide the RECAPTCHA_SECRET_KEY env var.');
+    }
+
     const webSocketApi = new apigw2.WebSocketApi(this, 'WebSocketApi');
 
     const webSocketStage = new apigw2.WebSocketStage(this, 'WebSocketStage', {
       webSocketApi,
       stageName: 'default',
       autoDeploy: true,
+    });
+
+    const connectHandlerLambda = new lambdaNodejs.NodejsFunction(
+      this,
+      'ConnectHandlerLambda',
+      {
+        entry: 'lambda/handlers/connect.js',
+        environment: {
+          RECAPTCHA_SECRET_KEY,
+        },
+        timeout: cdk.Duration.seconds(15),
+      },
+    );
+
+    webSocketApi.addRoute('$connect', {
+      integration: new apigw2Integrations.WebSocketLambdaIntegration(
+        'ConnectLambdaIntegration',
+        connectHandlerLambda,
+      ),
     });
 
     const transpileWorkerLambda = new lambda.DockerImageFunction(
